@@ -1,56 +1,48 @@
-// 共通ヘルパー: Anthropic APIを呼び、返答からJSONを取り出す。
-// APIキーは環境変数 ANTHROPIC_API_KEY から読む（コードには絶対書かない）。
+// POST /api/lookup
+// body: { mode: "word"|"idiom"|"translate", text: "調べたい語句" }
+// テキスト系の辞書機能をまとめて処理する。
 
-const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
-const MODEL = "claude-haiku-4-5-20251001"; // 辞書のような定型処理は安価なHaikuで十分
+const { callAnthropic } = require("./_anthropic");
 
-// モデルの返答テキストから JSON オブジェクトを頑丈に抽出する
-function extractJSON(text) {
-  if (!text) throw new Error("empty response");
-  let t = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```$/, "").trim();
-  try { return JSON.parse(t); } catch (e) {}
-  const start = t.indexOf("{");
-  const end = t.lastIndexOf("}");
-  if (start !== -1 && end !== -1 && end > start) {
-    try { return JSON.parse(t.slice(start, end + 1)); } catch (e) {}
+function buildPrompt(mode, val) {
+  if (mode === "word") {
+    return `次の語句について、日本語辞書・類語辞典として回答してください。JSON形式のみで、前置きや説明、コードフェンスは一切つけずに出力してください。
+形式: {"term":"入力された語句","reading":"読み方（ひらがな。英単語ならカタカナ発音表記）","meaning":"簡潔な意味の説明（1〜2文）","synonyms":["類語1","類語2","類語3"],"antonyms":["対義語（無ければ空配列）"]}
+語句:「${val}」`;
   }
-  throw new Error("could not parse JSON from model output");
+  if (mode === "idiom") {
+    return `次の文章の意味・情景に近い四字熟語または慣用句を1〜3個、日本語話者向けに提案してください。JSON形式のみで、前置きや説明、コードフェンスは一切つけずに出力してください。
+形式: {"original":"入力文章","suggestions":[{"idiom":"熟語または慣用句","reading":"読み方","meaning":"意味の説明（1文）"}]}
+文章:「${val}」`;
+  }
+  return `次の英文を自然な日本語に翻訳してください。JSON形式のみで、前置きや説明、コードフェンスは一切つけずに出力してください。
+形式: {"original":"入力英文","translation":"自然な日本語訳","notes":"補足や注意点があれば1文。無ければ空文字"}
+英文:「${val}」`;
 }
 
-// content 配列（テキスト or 画像ブロック）を渡して呼び出す
-async function callAnthropic(content) {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set");
+module.exports = async (req, res) => {
+  // CORS（同一オリジンで使う想定なので基本は自ドメインのみ）
+  res.setHeader("Access-Control-Allow-Origin", process.env.ALLOW_ORIGIN || "*");
+  res.setHeader("Access-Control-Allow-Headers", "content-type");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method !== "POST") return res.status(405).json({ error: "POSTのみ対応しています" });
 
-  const resp = await fetch(ANTHROPIC_URL, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      max_tokens: 1000,
-      messages: [{ role: "user", content }],
-    }),
-  });
+  try {
+    const { mode, text } = req.body || {};
+    if (!text || typeof text !== "string" || !text.trim()) {
+      return res.status(400).json({ error: "textが空です" });
+    }
+    if (text.length > 2000) {
+      return res.status(400).json({ error: "入力が長すぎます（2000文字まで）" });
+    }
+    const validModes = ["word", "idiom", "translate"];
+    const m = validModes.includes(mode) ? mode : "word";
 
-  if (!resp.ok) {
-    const detail = await resp.text().catch(() => "");
-    const err = new Error("anthropic error " + resp.status);
-    err.status = resp.status;
-    err.detail = detail;
-    throw err;
+    const parsed = await callAnthropic([{ type: "text", text: buildPrompt(m, text.trim()) }]);
+    return res.status(200).json(parsed);
+  } catch (err) {
+    console.error("lookup error:", err.status || "", err.message, err.detail || "");
+    return res.status(502).json({ error: "調べる処理に失敗しました。しばらくして再度お試しください。" });
   }
-
-  const data = await resp.json();
-  const text = (data.content || [])
-    .filter((b) => b.type === "text")
-    .map((b) => b.text || "")
-    .join("")
-    .trim();
-  return extractJSON(text);
-}
-
-module.exports = { callAnthropic, extractJSON };
+};
