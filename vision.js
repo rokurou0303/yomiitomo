@@ -1,27 +1,16 @@
-// POST /api/lookup
-// body: { mode: "word"|"idiom"|"translate", text: "調べたい語句" }
-// テキスト系の辞書機能をまとめて処理する。
+// POST /api/vision
+// body: { mode: "image"|"handwrite", image: "<base64>", mediaType: "image/jpeg" }
+// 画像OCR（ふりがな＋翻訳）と手書き認識をまとめて処理する。
 
 const { callAnthropic } = require("./_anthropic");
 
-function buildPrompt(mode, val) {
-  if (mode === "word") {
-    return `次の語句について、日本語辞書・類語辞典として回答してください。JSON形式のみで、前置きや説明、コードフェンスは一切つけずに出力してください。
-形式: {"term":"入力された語句","reading":"読み方（ひらがな。英単語ならカタカナ発音表記）","meaning":"簡潔な意味の説明（1〜2文）","synonyms":["類語1","類語2","類語3"],"antonyms":["対義語（無ければ空配列）"]}
-語句:「${val}」`;
-  }
-  if (mode === "idiom") {
-    return `次の文章の意味・情景に近い四字熟語または慣用句を1〜3個、日本語話者向けに提案してください。JSON形式のみで、前置きや説明、コードフェンスは一切つけずに出力してください。
-形式: {"original":"入力文章","suggestions":[{"idiom":"熟語または慣用句","reading":"読み方","meaning":"意味の説明（1文）"}]}
-文章:「${val}」`;
-  }
-  return `次の英文を自然な日本語に翻訳してください。JSON形式のみで、前置きや説明、コードフェンスは一切つけずに出力してください。
-形式: {"original":"入力英文","translation":"自然な日本語訳","notes":"補足や注意点があれば1文。無ければ空文字"}
-英文:「${val}」`;
-}
+const IMAGE_PROMPT = `この画像に写っている文章を読み取ってください。JSON形式のみで、前置き・説明・コードフェンスは一切つけずに出力してください。
+形式: {"original_text":"画像から読み取った原文","furigana_text":"原文の漢字すべてに、その漢字の直後に「（読み）」の形でふりがなを付けたテキスト。前後の文脈から自然な読みを選ぶこと。漢字が無い場合は原文をそのまま入れる。","language":"検出した言語（日本語／英語 など）","translation":"原文が日本語以外なら自然な日本語訳、原文が日本語なら自然な英語訳"}`;
+
+const HANDWRITE_PROMPT = `この画像には手書きの文字・単語が描かれています。書かれている内容を認識し、日本語辞書・類語辞典として回答してください。JSON形式のみで、前置き・説明・コードフェンスは一切つけずに出力してください。
+形式: {"term":"認識した語句","reading":"読み方（ひらがな。英単語ならカタカナ発音表記）","meaning":"簡潔な意味の説明（1〜2文）","synonyms":["類語1","類語2","類語3"],"antonyms":["対義語（無ければ空配列）"]}`;
 
 module.exports = async (req, res) => {
-  // CORS（同一オリジンで使う想定なので基本は自ドメインのみ）
   res.setHeader("Access-Control-Allow-Origin", process.env.ALLOW_ORIGIN || "*");
   res.setHeader("Access-Control-Allow-Headers", "content-type");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -29,20 +18,24 @@ module.exports = async (req, res) => {
   if (req.method !== "POST") return res.status(405).json({ error: "POSTのみ対応しています" });
 
   try {
-    const { mode, text } = req.body || {};
-    if (!text || typeof text !== "string" || !text.trim()) {
-      return res.status(400).json({ error: "textが空です" });
+    const { mode, image, mediaType } = req.body || {};
+    if (!image || typeof image !== "string") {
+      return res.status(400).json({ error: "画像データがありません" });
     }
-    if (text.length > 2000) {
-      return res.status(400).json({ error: "入力が長すぎます（2000文字まで）" });
+    // base64のおおよそのサイズ上限（約6MB相当）
+    if (image.length > 8_000_000) {
+      return res.status(400).json({ error: "画像が大きすぎます。縮小して再度お試しください。" });
     }
-    const validModes = ["word", "idiom", "translate"];
-    const m = validModes.includes(mode) ? mode : "word";
+    const mt = /^image\/(png|jpeg|webp|gif)$/.test(mediaType || "") ? mediaType : "image/jpeg";
+    const prompt = mode === "handwrite" ? HANDWRITE_PROMPT : IMAGE_PROMPT;
 
-    const parsed = await callAnthropic([{ type: "text", text: buildPrompt(m, text.trim()) }]);
+    const parsed = await callAnthropic([
+      { type: "image", source: { type: "base64", media_type: mt, data: image } },
+      { type: "text", text: prompt },
+    ]);
     return res.status(200).json(parsed);
   } catch (err) {
-    console.error("lookup error:", err.status || "", err.message, err.detail || "");
-    return res.status(502).json({ error: "調べる処理に失敗しました。しばらくして再度お試しください。" });
+    console.error("vision error:", err.status || "", err.message, err.detail || "");
+    return res.status(502).json({ error: "画像の処理に失敗しました。しばらくして再度お試しください。" });
   }
 };
