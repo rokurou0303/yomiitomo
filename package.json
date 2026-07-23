@@ -1,9 +1,9 @@
-# 秘密情報は絶対にコミットしない
-.env
-.env.local
-.env.*.local
-
-# 依存とビルド
-node_modules/
-.vercel/
-.DS_Store
+{
+  "name": "yomitomo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ヨミトモ — 読書のお供の言葉ノート",
+  "engines": {
+    "node": ">=18"
+  }
+}
