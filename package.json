@@ -1,0 +1,9 @@
+# 秘密情報は絶対にコミットしない
+.env
+.env.local
+.env.*.local
+
+# 依存とビルド
+node_modules/
+.vercel/
+.DS_Store
