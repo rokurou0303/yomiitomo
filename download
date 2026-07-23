@@ -1,10 +1,9 @@
-# このファイルは「見本」です。実際の値は書かず、Vercelの管理画面に設定します。
-# ローカルで試すときだけ、これを .env にコピーして値を入れてください（.env はコミットしない）。
+# 秘密情報は絶対にコミットしない
+.env
+.env.local
+.env.*.local
 
-# Anthropic APIキー（sk-ant- で始まる文字列）
-ANTHROPIC_API_KEY=sk-ant-xxxxxxxxxxxxxxxxxxxxxxxx
-
-# 許可するアクセス元（公開後は自分のサイトのURLに絞ると安全）
-# 例: https://yomitomo.vercel.app
-# 未設定なら "*"（どこからでも可）になります。動作確認の間はこのままでOK。
-ALLOW_ORIGIN=*
+# 依存とビルド
+node_modules/
+.vercel/
+.DS_Store
